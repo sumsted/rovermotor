@@ -34,8 +34,11 @@
 
 Servo motor_left;
 Servo motor_right;
-byte incomingByte;
-bool commandProcessed = false;
+//byte incomingByte;
+SimpleTimer timer;
+
+bool commandProcessed = false; // check used by safety timer to tell if command issued
+byte ledVal = HIGH; // safety timer flips the led on and off
 
 void run_motor(int speed, int orientation){
     int pulse = PWM_STOP;
@@ -115,88 +118,118 @@ void  blink_led(byte ms){
     delay(ms*3);
 }
 
-// ISR(TIMER1_OVF_vect) {
-//     uint16_t ticks = micros();
-//     if((ticks%SAFETY_CADENCE_MS) == 0){
-//         if(!commandProcessed){
-//             motor_left.write(PWM_STOP);
-//             motor_right.write(PWM_STOP);
-//             Serial.println("** stop **");
-//         }
-//         commandProcessed = false;
-// //        Serial.println("ticks : "+String(ticks)+" cadence : "+String(SAFETY_CADENCE_MS));
-//     }
-//     Serial.println("ticks : "+String(ticks)+" cadence : "+String(SAFETY_CADENCE_MS));
-// }
-
 void safetyCheck() {
     if(!commandProcessed){
         motor_left.write(PWM_STOP);
         motor_right.write(PWM_STOP);
-        Serial.println("commandProcessed is false");
-        Serial.println("** safety stop **");
+        // Serial.println("commandProcessed is false");
+        // Serial.println("** safety stop **");
     } else {
-        Serial.println("commandProcessed is true");
+        // Serial.println("commandProcessed is true");
     }
     commandProcessed = false;
-    Serial.println("safetyCheck");
+    // Serial.println("safetyCheck");
+    ledVal = (ledVal == HIGH)?LOW:HIGH;
+    digitalWrite(LED_PIN, ledVal);
 }
-
-SimpleTimer timer;
 
 void setup() {
     Serial.begin(9600);
     while(!Serial){}
+
     Serial.println("begin");
     timer.setInterval(SAFETY_CADENCE_MS, safetyCheck);
-
-    // noInterrupts();
-    // TIMSK1 |= (1<<TOIE1);
-    // interrupts();
-    // safety timer
-    // noInterrupts();           // disable all interrupts
-    // TCCR1A = 0;
-    // TCCR1B = 0;
-    // TCNT1  = 0;
-
-    // OCR1A = 31250;            // compare match register 16MHz/256/2Hz
-    // TCCR1B |= (1 << WGM12);   // CTC mode
-    // TCCR1B |= (1 << CS12);    // 256 prescaler 
-    // TIMSK1 |= (1 << OCIE1A);  // enable timer compare interrupt
-    // interrupts(); 
-
     pinMode(LED_PIN, OUTPUT);
     motor_right.attach(MOTOR_PIN_RF);
 }
 
+#define MAX_BUFFER_SIZE 50
+
+void doStep(byte step){
+    // Serial.println("step: "+String(step));
+    // delay(1000);
+}
+
 void serialHandler(){
-    if (Serial.available() > 0) {
-        incomingByte = Serial.read();
-        Serial.print(" I received:");
-        Serial.println(incomingByte);
-        switch(incomingByte){
+    char readBuffer[MAX_BUFFER_SIZE] = "";
+    String readString;
+    doStep(1);
+
+    while(Serial.available() > 0){ 
+        // todo: may rewrite this to just read chars until end char
+        // as i'd have to set time on readstring anyway 
+        // and read until defaults to timeout if no end char
+        // might be easier to understand if i just wrote it myself
+        // for now all serial commands must end with a bang !
+        // otherwise crap gets weird, slow read because of timeout
+        // and safety seems to kick in sooner and shut everything down
+        // haven't figured out that yet, but if scrap read string
+        // wont need to
+        doStep(2);      
+        readString = Serial.readStringUntil('!');
+    }
+
+    doStep(3);
+    if(readString.length() > 0){
+        doStep(4);
+        readString.toCharArray(readBuffer, MAX_BUFFER_SIZE);
+        Serial.println("readBuffer: "+String(readBuffer));
+        char command = readBuffer[0];
+        int speed = atoi(readBuffer+1);
+        Serial.println("command: "+String(command)+", speedchars: "+String((readBuffer+1))+", speed: "+String(speed));
+        switch(command){
+
+            // general robot direction commands
+            // todo add remaining commands
             case 'w':
+            case 'W':
                 move(BOT_FORWARD, 50);
                 commandProcessed = true;
                 break;
             case 's':
+            case 'S':
                 move(BOT_BACKWARD, 50);
                 commandProcessed = true;
                 break;
             case 'a':
+            case 'A':
                 move(BOT_ROTATE_LEFT, 50);
                 commandProcessed = true;
                 break;
             case 'd':
+            case 'D':
                 move(BOT_ROTATE_RIGHT, 50);
                 commandProcessed = true;
                 break;
+
+            // stop and detach, detach kills pulse to motors
+            // while stop sends pwm 1500 which is middle for 
+            // these frc controllers
             case 'x':
-                move(BOT_ROTATE_RIGHT, 50);
+            case 'X':
+                move(BOT_STOP, 0);
                 commandProcessed = true;
                 break;
             case ' ':
                 motor_right.detach();
+                commandProcessed = true;
+                break;
+
+            // control motors individually, just two motors for now
+            // left motor y
+            // right motor u
+            // speed -100 to 100
+            // format y-50   = left motor -50
+            // positive speed is robot fwd and is calculated run_motor...
+            // and set using ORIENTATION macros
+            case 'y':
+            case 'Y':
+                run_motor_left(speed);
+                commandProcessed = true;
+                break;
+            case 'u':
+            case 'U':
+                run_motor_right(speed);
                 commandProcessed = true;
                 break;
         }
@@ -206,5 +239,4 @@ void serialHandler(){
 void loop() {
     serialHandler();
     timer.run();
-    // blink_led(100);
 }
