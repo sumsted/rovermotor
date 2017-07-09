@@ -32,9 +32,10 @@
 
 #define SAFETY_CADENCE_MS 500  // millisecs
 
+#define MAX_BUFFER_SIZE 50
+
 Servo motor_left;
 Servo motor_right;
-//byte incomingByte;
 SimpleTimer timer;
 
 bool commandProcessed = false; // check used by safety timer to tell if command issued
@@ -42,14 +43,11 @@ byte ledVal = HIGH; // safety timer flips the led on and off
 
 void run_motor(int speed, int orientation){
     int pulse = PWM_STOP;
-    Serial.print("right: "+String(speed));
     if(speed > 100 || speed < -100){
         motor_right.write(PWM_STOP);
-        Serial.println(", threshold pulse: "+String(PWM_STOP));
     } else {
         pulse = PWM_STOP + ((PWM_FULL_FORWARD - PWM_STOP) * (speed*PWM_TUNE_PERCENTAGE)/100 * orientation);
         motor_right.write(pulse);
-        Serial.println(", pulse: "+String(pulse));
     }
 }
 
@@ -122,32 +120,21 @@ void safetyCheck() {
     if(!commandProcessed){
         motor_left.write(PWM_STOP);
         motor_right.write(PWM_STOP);
-        // Serial.println("commandProcessed is false");
-        // Serial.println("** safety stop **");
     } else {
-        // Serial.println("commandProcessed is true");
     }
     commandProcessed = false;
-    // Serial.println("safetyCheck");
     ledVal = (ledVal == HIGH)?LOW:HIGH;
     digitalWrite(LED_PIN, ledVal);
 }
 
-void setup() {
-    Serial.begin(9600);
-    while(!Serial){}
-
-    Serial.println("begin");
-    timer.setInterval(SAFETY_CADENCE_MS, safetyCheck);
-    pinMode(LED_PIN, OUTPUT);
-    motor_right.attach(MOTOR_PIN_RF);
-}
-
-#define MAX_BUFFER_SIZE 50
-
 void doStep(byte step){
+    // for debugging
     // Serial.println("step: "+String(step));
     // delay(1000);
+}
+
+char *readEncoders(){
+    return "{\"left\":321,\"right\":123}";
 }
 
 void serialHandler(){
@@ -162,9 +149,8 @@ void serialHandler(){
         // might be easier to understand if i just wrote it myself
         // for now all serial commands must end with a bang !
         // otherwise crap gets weird, slow read because of timeout
-        // and safety seems to kick in sooner and shut everything down
-        // haven't figured out that yet, but if scrap read string
-        // wont need to
+        // and safety kicks in immediately and shut everything down
+
         doStep(2);      
         readString = Serial.readStringUntil('!');
     }
@@ -173,14 +159,13 @@ void serialHandler(){
     if(readString.length() > 0){
         doStep(4);
         readString.toCharArray(readBuffer, MAX_BUFFER_SIZE);
-        Serial.println("readBuffer: "+String(readBuffer));
+        // Serial.println("readBuffer: "+String(readBuffer));
         char command = readBuffer[0];
         int speed = atoi(readBuffer+1);
-        Serial.println("command: "+String(command)+", speedchars: "+String((readBuffer+1))+", speed: "+String(speed));
+        // Serial.println("command: "+String(command)+", speedchars: "+String((readBuffer+1))+", speed: "+String(speed));
         switch(command){
 
             // general robot direction commands
-            // todo add remaining commands
             case 'w':
             case 'W':
                 move(BOT_FORWARD, 50);
@@ -199,6 +184,26 @@ void serialHandler(){
             case 'd':
             case 'D':
                 move(BOT_ROTATE_RIGHT, 50);
+                commandProcessed = true;
+                break;
+            case 'q':
+            case 'Q':
+                move(BOT_FORWARD_LEFT, 50);
+                commandProcessed = true;
+                break;
+            case 'e':
+            case 'E':
+                move(BOT_FORWARD_RIGHT, 50);
+                commandProcessed = true;
+                break;
+            case 'z':
+            case 'Z':
+                move(BOT_BACKWARD_LEFT, 50);
+                commandProcessed = true;
+                break;
+            case 'c':
+            case 'C':
+                move(BOT_BACKWARD_RIGHT, 50);
                 commandProcessed = true;
                 break;
 
@@ -220,7 +225,7 @@ void serialHandler(){
             // right motor u
             // speed -100 to 100
             // format y-50   = left motor -50
-            // positive speed is robot fwd and is calculated run_motor...
+            // positive speed is robot fwd and is calculated in run_motor...
             // and set using ORIENTATION macros
             case 'y':
             case 'Y':
@@ -233,7 +238,18 @@ void serialHandler(){
                 commandProcessed = true;
                 break;
         }
+        Serial.write(readEncoders());
     }
+}
+
+void setup() {
+    Serial.begin(9600);
+    while(!Serial){}
+
+    Serial.println("begin");
+    timer.setInterval(SAFETY_CADENCE_MS, safetyCheck);
+    pinMode(LED_PIN, OUTPUT);
+    motor_right.attach(MOTOR_PIN_RF);
 }
 
 void loop() {
